@@ -1,0 +1,230 @@
+demo_func = lambda x: x[0] ** 2 + (x[1] - 0.05) ** 2 + x[2] ** 2
+from sko.SA import SA
+sa = SA(func=demo_func, x0=[1, 1, 1], T_max=1, T_min=1e-9, L=300, max_stay_counter=150)
+best_x, best_y = sa.run()
+print('best_x:', best_x, 'best_y', best_y)
+import matplotlib.pyplot as plt
+import pandas as pd
+plt.plot(pd.DataFrame(sa.best_y_history).cummin(axis=0))
+plt.show()
+
+
+
+import numpy as np
+import pandas as pd
+import threading
+import time
+from queue import Queue
+import matplotlib.pyplot as plt
+import random
+
+###状态是对方的投资力度和消费者购买情况
+np.random.seed(2)
+accuracy=99
+Keep_point=2
+powerA=np.round(np.linspace(0.01,0.99,accuracy),Keep_point)
+powerB=np.round(np.linspace(0.01,0.99,accuracy),Keep_point)
+# buyAproportion=np.round(np.linspace(0.01,0.99,accuracy),Keep_point)
+# buyBproportion=np.round(np.linspace(0.01,0.99,accuracy),Keep_point)
+# powerA_buyB=np.round(list(itl.product(powerA,buyBproportion)),Keep_point)
+# powerB_buyA=np.round(list(itl.product(powerB,buyAproportion)),Keep_point)
+
+N_STATES_A=[i for i in range(len(powerB))]
+ACTIONS_A=[i for i in range(len(powerA))]#有几个行动
+ACTIONS_B=[i for i in range(len(powerB))]
+N_STATES_B=[i for i in range(len(powerA))]#有几个行动C
+num=500
+pic=50000
+MAX_EPISODES=3#只玩13回合
+MAX_STEP=50000#只玩13回合
+EPSILON=0.99#贪心
+ALPHA=0.1#学习率
+LAMBDA=0.9#折现率
+pp=np.arange(10,MAX_EPISODES,10)
+FRESH_TIME=0.01#每一步花的时间
+move=0.001
+def boundary(x):
+    x[x>1]=1
+    x[x<0]=0
+    return x
+def pa(x,Ka):
+    f=1/(np.exp(x/(Ka)))
+    return f
+def pb(x,Kb):
+    f=1/(np.exp(x/(Kb)))
+    return f
+
+def zong(x,Ka,Kb,a,b):
+    f=np.exp(a*np.log(pa(x,Ka))+b*np.log(1-pb((1-x),Kb)))/(np.exp(a * np.log(pa(x, Ka)) + b * np.log(1 - pb((1-x), Kb)))+np.exp(a*np.log(1-pa(x,Ka))+b*np.log(pb((1-x),Kb))))
+    return f
+
+def proportion(x,Ka,Kb):
+    b = [random.random() for j in range(len(x))]
+    picka = zong(x,Ka,Kb, 1, 1)
+    pickb = zong(x,Ka,Kb, 1, 1)
+    picka[b <= picka] = 1
+    picka[picka < 1] = 0
+    pickb[b > pickb] = 1
+    pickb[pickb < 1] = 0
+    chose_a=len(np.where(picka==1)[0])/len(picka)
+    chose_b=len(np.where(picka==0)[0])/len(picka)
+    xc= boundary(x + (picka * (-move) + pickb * move))
+    if chose_a==0:
+        chose_a=chose_a+0.01
+    elif chose_a==1:
+        chose_a=chose_a-0.01
+    else:
+        chose_a=chose_a
+    if chose_b==0:
+        chose_b=chose_b+0.01
+    elif chose_b==1:
+        chose_b=chose_b-0.01
+    else:
+        chose_b=chose_b
+    return round(chose_a,Keep_point),round(chose_b,Keep_point),xc
+
+def build_q_table(n_states,actions):
+    table=pd.DataFrame(np.zeros((len(n_states),len(actions))))
+    return table
+
+def chose_action(state,q_table,ACTIONS):
+    state_actions=q_table.iloc[state,:]
+    if (np.random.uniform()>EPSILON) or (state_actions.all()==0):
+        action_name=np.random.choice(ACTIONS)
+    else:
+        action_name=state_actions.idxmax()
+    return action_name
+
+def feedbackA(A):##firm A
+    AgiveB.put(A)
+    AgiveC.put(A)
+    while True:
+        SA_fromB= BgiveA.get()
+        SA_fromC=CgiveA.get()
+        break
+    RA=1*SA_fromC-0.5*powerA[A]**2
+    S_Anext=SA_fromB
+    return S_Anext,RA
+
+def feedbackB(A1):#firm B
+    BgiveA.put(A1)
+    BgiveC.put(A1)
+    while True:
+        SB_fromA = AgiveB.get()
+        SB_fromC = CgiveB.get()
+        break
+    RB=1*SB_fromC-2*powerB[A1]**2
+    S_Bnext = SB_fromA
+    return S_Bnext,RB
+
+q_tableA=build_q_table(N_STATES_A,ACTIONS_A)
+q_tableB=build_q_table(N_STATES_B,ACTIONS_B)
+loc0=np.zeros((MAX_EPISODES, num))
+
+valueA1=[]
+valueB1=[]
+def firmA():
+    for episode in range(MAX_EPISODES):
+        # print("episode",episode)
+        SA2 = 0
+        terminatedA=False
+        while not terminatedA:
+            Aaction=chose_action(SA2,q_tableA,ACTIONS_A)
+            valueA1.append(powerA[Aaction])
+            AnextS,AgetR=feedbackA(Aaction)
+            # print("公司A： ","当前B",powerB_buyA[SA2][0],"当前C",powerB_buyA[SA2][1],"当前选择动作",powerA[Aaction],"反馈",AgetR,"下一步B",powerB_buyA[AnextS][0],"下一步C",powerB_buyA[AnextS][1])
+            q_predict=q_tableA.loc[SA2,Aaction]
+            # print(q_predict)
+            q_target=AgetR+LAMBDA*q_tableA.iloc[AnextS,:].max()
+            q_tableA.loc[SA2,Aaction]+=ALPHA*(q_target-q_predict)
+            SA2=AnextS
+    return q_tableA
+
+def firmB():
+    for episode in range(MAX_EPISODES):
+        SB3 = 0
+        step_counter=0
+        terminatedB=False
+        while not terminatedB:
+            Baction=chose_action(SB3,q_tableB,ACTIONS_B)
+            valueB1.append(powerB[Baction])
+            BnextS,BgetR=feedbackB(Baction)
+            # print("公司B： ","当前A",powerA_buyB[SB3][0],"当前C",powerA_buyB[SB3][1],"当前选择动作",powerB[Baction],"反馈",BgetR,"下一步A",powerA_buyB[BnextS][0],"下一步C",powerA_buyB[BnextS][1])
+            q_predict1=q_tableB.loc[SB3,Baction]
+            # print(q_predict)
+            q_target1=BgetR+LAMBDA*q_tableB.iloc[BnextS,:].max()
+            q_tableB.loc[SB3,Baction]+=ALPHA*(q_target1-q_predict1)
+            SB3=BnextS
+            terminatedB= CstatetoB.get()
+            step_counter=step_counter+1
+            print("episode", episode,"step_counter",step_counter)
+    return q_tableB
+
+def consumer():
+    for episode in range(MAX_EPISODES):
+        np.random.seed(0)
+        is_terminated = False
+        firmApower = 0.5
+        firmBpower = 0.5
+        # consumerbuyA = []
+        # consumerbuyB = []
+        peopleloc = np.random.uniform(0, 1, size=(1, num))[0]
+        step = 0
+        while not is_terminated:
+            AA = proportion(peopleloc,firmApower,firmBpower)
+            # print("消费者C： ","买A的人",AA[0],"买B的人",AA[1])
+            # consumerbuyA.append(AA[0])
+            # consumerbuyB.append(AA[1])
+            CgiveA.put(AA[0])
+            CgiveB.put(AA[1])
+            peopleloc = AA[2]
+            step = step + 1
+            if step>=MAX_STEP:
+                is_terminated = True
+            else:
+                is_terminated = False
+            CstatetoA.put(is_terminated)
+            CstatetoB.put(is_terminated)
+            while True:
+                firmApower =AgiveC.get()
+                firmBpower =BgiveC.get()
+                break
+        loc0[episode]=peopleloc
+    return loc0
+
+if __name__ == "__main__":
+#创建队列
+    AgiveB = Queue()
+    AgiveC = Queue()
+    BgiveA = Queue()
+    BgiveC=Queue()
+    CgiveA = Queue()
+    CgiveB = Queue()
+    CstatetoA=Queue()
+    CstatetoB=Queue()
+    # 创建生产者
+    fa = threading.Thread(target=firmA)
+    fb = threading.Thread(target=firmB)
+    com=threading.Thread(target=consumer)
+    fa.start()
+    fb.start()
+    com.start()
+    fa.join()
+    fb.join()
+    com.join()
+# print(loc0)
+# print(v0)
+# print(v1)
+x=np.arange(pic)
+fig = plt.figure()
+plt.subplot(211)
+plt.scatter(x, valueA1[-pic:], label='valueA', c="r")
+plt.subplot(212)
+plt.scatter(x, valueB1[-pic:], label='valueB', c="b")
+# plt.subplot(223)
+# plt.plot(x, consumerbuyA, label='buyA', c="r")
+# plt.subplot(224)
+# plt.plot(x, consumerbuyB, label='buyB', c="b")
+# y=[0.5]*len(loc0[-1])
+# plt.scatter(loc0[-1],y)
+plt.show()
